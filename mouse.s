@@ -201,6 +201,9 @@ WGDisableMouse:
 
 	stz WG_MOUSEACTIVE
 
+	lda #MOUSEMODE_OFF			; Disable VBL manually
+	CALLMOUSE SETMOUSE
+
 	; Remove our interrupt handler via ProDOS (done playing nice!)
 	lda WG_PRODOS_ALLOC+1		; Copy interrupt ID that ProDOS gave us
 	sta WG_PRODOS_DEALLOC+1
