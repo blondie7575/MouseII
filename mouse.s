@@ -59,6 +59,7 @@ MOUSE_ZEROL = $0478		; Zero value of mouse (LSB). Slot independent.
 MOUSE_ZEROH = $0578		; Zero value of mouse (MSB). Slot independent.
 
 MOUSTAT_MASK_BUTTONINT = %00000100
+MOUSTAT_MASK_VBLINT = %00001000
 MOUSTAT_MASK_MOVEINT = %00000010
 MOUSTAT_MASK_DOWN = %10000000
 MOUSTAT_MASK_WASDOWN = %01000000
@@ -68,7 +69,7 @@ MOUSEMODE_OFF = $00		; Mouse off
 MOUSEMODE_PASSIVE = $01	; Passive mode (polling only)
 MOUSEMODE_MOVEINT = $03	; Interrupts on movement
 MOUSEMODE_BUTINT = $05	; Interrupts on button
-MOUSEMODE_COMBINT = $07	; Interrupts on movement and button
+MOUSEMODE_COMBINT = $0f	; Interrupts on VBL, movement and button
 
 
 ; Mouse firmware is all indirectly called, because
@@ -330,8 +331,10 @@ WGMouseInterruptHandler:
 	SAVE_AXY
 
 	CALLMOUSE SERVEMOUSE
-	bcs WGMouseInterruptHandler_disregard
+	bcc WGMouseInterruptHandler_regard
+	jmp WGMouseInterruptHandler_disregard
 
+WGMouseInterruptHandler_regard:
 	php
 	sei
 
@@ -344,6 +347,12 @@ WGMouseInterruptHandler:
 	and #MOUSTAT_MASK_BUTTONINT
 	bne WGMouseInterruptHandler_button
 
+	lda MOUSTAT,x
+	and #MOUSTAT_MASK_MOVEINT
+	bne WGMouseInterruptHandler_mouse
+	jmp WGMouseInterruptHandler_VBL
+
+WGMouseInterruptHandler_mouse:
 	jsr WGUndrawPointer			; Erase the old mouse pointer
 
 	; Read the mouse state. Note that interrupts need to remain
@@ -409,9 +418,15 @@ WGMouseInterruptHandler_button:
 
 	bit WG_MOUSE_STAT			; Check for rising edge of button state
 	bpl WGMouseInterruptHandler_intDone
-	bvs WGMouseInterruptHandler_intDone		; Held, so ignore (//c only, but more elegant code to leave in for both)
 
+	lda WG_MOUSE_BUTTON_DOWN
+	bne WGMouseInterruptHandler_intDone
+
+WGMouseInterruptHandler_buttonDown:
 	; Button went down, so make a note of location for later
+	lda #1
+	sta WG_MOUSE_BUTTON_DOWN
+
 	lda WG_MOUSEPOS_X
 	sta WG_MOUSECLICK_X
 	lda WG_MOUSEPOS_Y
@@ -422,6 +437,17 @@ WGMouseInterruptHandler_intDone:
 	bpl WGMouseInterruptHandler_intDoneBankOff
 	SETSWITCH	PAGE2ON
 	bra WGMouseInterruptHandler_done
+
+WGMouseInterruptHandler_VBL:
+	CALLMOUSE READMOUSE
+	ldx WG_MOUSE_SLOT
+	lda MOUSTAT,x			; Movement/button status bits are now valid
+	sta WG_MOUSE_STAT
+
+	bmi WGMouseInterruptHandler_intDone
+
+	stz WG_MOUSE_BUTTON_DOWN
+	bra WGMouseInterruptHandler_intDone
 
 WGMouseInterruptHandler_intDoneBankOff:
 	SETSWITCH	PAGE2OFF
@@ -488,7 +514,8 @@ WG_MOUSE_SLOT:
 .byte 0
 WG_MOUSE_SLOTSHIFTED:
 .byte 0
-
+WG_MOUSE_BUTTON_DOWN:
+.byte 0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; ProDOS system call parameter blocks

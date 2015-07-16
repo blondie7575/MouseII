@@ -9,6 +9,7 @@ Supports the Apple //e Enhanced with a mouse card in any slot. Also supports App
 Known issues
 ------------
 
-- Subsequent clicks will not be detected if the mouse doesn't move in between
+- On Apple //c, mouse movement is ignored while button is down
+
 
 
