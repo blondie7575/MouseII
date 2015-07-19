@@ -1,6 +1,6 @@
 **Mouse Driver for Apple II computers**
 
-Supports the Apple //e Enhanced with a mouse card in any slot. Also supports Apple //c and //c+. May work on Apple IIgs as well.
+Supports the Apple //e Enhanced with a mouse card in any slot. Also supports Apple //c and //c+
 
 
 
@@ -8,8 +8,7 @@ Supports the Apple //e Enhanced with a mouse card in any slot. Also supports App
 
 Known issues
 ------------
-
-- On Apple //c, mouse movement is ignored while button is down
+Does not crash on Apple IIgs, but doesn't exactly work either.
 
 
 
