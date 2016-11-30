@@ -3,6 +3,7 @@
 ;  Mouse driver for Apple //e Enhanced with mouse card (any slot), or Apple //c(+)
 ;
 ;  Created by Quinn Dunki on 7/14/15.
+;  Updated on 11/29/16 by Peter Ferrie.
 ;  Copyright (c) 2014 One Girl, One Laptop Productions. All rights reserved.
 ;
 
@@ -100,11 +101,8 @@ WGEnableMouse:
 	cmp #$06
 	bne WGEnableMouse_Error		; II or II+? Sorry...
 	lda $fbc0
-	bne WGEnableMouse_IIe
-	lda #1
-	sta WG_APPLEIIC
+	sta WG_APPLEIIE
 
-WGEnableMouse_IIe:
 	; Install our interrupt handler via ProDOS (play nice!)
 	jsr PRODOS_MLI
 	.byte ALLOC_INTERRUPT
@@ -126,8 +124,7 @@ WGEnableMouse_IIe:
 
 	; Set the mouse's zero postion to (1,1), since we're in text screen space
 	stz MOUSE_ZEROH
-	lda #0
-	sta MOUSE_ZEROL
+	stz MOUSE_ZEROL
 	lda #1
 	CALLMOUSE CLAMPMOUSE
 	lda #0
@@ -135,52 +132,52 @@ WGEnableMouse_IIe:
 
 	; Scale the mouse's range into something easy to do math with,
 	; while retaining as much range of motion and precision as possible
-	lda WG_APPLEIIC
-	bne WGEnableMouse_ConfigIIc		; Sorry //c, no scaling for you
+	lda WG_APPLEIIE
+	bne WGEnableMouse_ConfigIIe
 
-	lda #<SCALE_X_IIE
-	sta MOUSE_CLAMPL
+	; Sorry //c, no scaling for you
+	; //c's tracking is weird. Need to clamp to a much smaller range
+
+	lda #>SCALE_X_IIC
+	pha
+	lda #<SCALE_X_IIC
+	ldx #<SCALE_Y_IIC
+	ldy #>SCALE_Y_IIC
+	bra WGClampMouse1
+
+WGEnableMouse_ConfigIIe:
 	lda #>SCALE_X_IIE
-	sta MOUSE_CLAMPH
-	lda #0
-	CALLMOUSE CLAMPMOUSE
+	pha
+	lda #<SCALE_X_IIE
+	ldx #<SCALE_Y_IIE
+	ldy #>SCALE_Y_IIE
 
-	lda #<SCALE_Y_IIE
-	sta MOUSE_CLAMPL
-	lda #>SCALE_Y_IIE
-	sta MOUSE_CLAMPH
+WGClampMouse1
+	pha
 	lda #1
+	.byte $2C				; mask plx/ply
+WGClampMouse2
+        plx
+        ply
+	stx MOUSE_CLAMPL
+	sty MOUSE_CLAMPH
+	pha
 	CALLMOUSE CLAMPMOUSE
-	bra WGEnableMouse_Activate
+        pla
+        dec
+        bpl WGClampMouse2
+
+WGEnableMouse_Activate:
+	inc WG_MOUSEACTIVE
+
+	cli					; Once all setup is done, it's safe to enable interrupts
 
 WGEnableMouse_Error:
-	stz WG_MOUSEACTIVE
 
 WGEnableMouse_done:			; Exit point here for branch range
 	pla
 	rts
 
-WGEnableMouse_ConfigIIc:	; //c's tracking is weird. Need to clamp to a much smaller range
-	lda #<SCALE_X_IIC
-	sta MOUSE_CLAMPL
-	lda #>SCALE_X_IIC
-	sta MOUSE_CLAMPH
-	lda #0
-	CALLMOUSE CLAMPMOUSE
-
-	lda #<SCALE_Y_IIC
-	sta MOUSE_CLAMPL
-	lda #>SCALE_Y_IIC
-	sta MOUSE_CLAMPH
-	lda #1
-	CALLMOUSE CLAMPMOUSE
-
-WGEnableMouse_Activate:
-	lda #1
-	sta WG_MOUSEACTIVE
-
-	cli					; Once all setup is done, it's safe to enable interrupts
-	bra WGEnableMouse_done
 
 
 
@@ -196,21 +193,19 @@ WGDisableMouse:
 	lda WG_MOUSEACTIVE			; Never activated the mouse
 	beq WGDisableMouse_done
 
-	lda MOUSEMODE_OFF
+	lda #MOUSEMODE_OFF
 	CALLMOUSE SETMOUSE
 
 	stz WG_MOUSEACTIVE
 
-	lda #MOUSEMODE_OFF			; Disable VBL manually
-	CALLMOUSE SETMOUSE
-
 	; Remove our interrupt handler via ProDOS (done playing nice!)
-	lda WG_PRODOS_ALLOC+1		; Copy interrupt ID that ProDOS gave us
-	sta WG_PRODOS_DEALLOC+1
+	dec WG_PRODOS_ALLOC		; change Alloc parm count to DeAlloc parm count
 
 	jsr PRODOS_MLI
 	.byte DEALLOC_INTERRUPT
-	.addr WG_PRODOS_DEALLOC
+	.addr WG_PRODOS_ALLOC
+
+	inc WG_PRODOS_ALLOC		; restore DeAlloc parm count to Alloc parm count
 
 	jsr WGUndrawPointer			; Be nice if we're disabled during a program
 
@@ -258,60 +253,42 @@ WGCallMouse_redirect:
 WGFindMouse:
 	SAVE_AX
 
-	ldx #7
+	stz WG_MOUSE_SLOT
+	ldx #$c7
 
 WGFindMouse_loop:
-	txa							; Compute slot firmware locations for this loop
-	ora #$c0
-	sta WGFindMouse_loopModify+2		; Self-modifying code!
-	sta WGFindMouse_loopModify+9
-	sta WGFindMouse_loopModify+16
-	sta WGFindMouse_loopModify+23
-	sta WGFindMouse_loopModify+30
+	stx WGFindMouse_loopModify+6		; Self-modifying code!
+	ldy #4
 
 WGFindMouse_loopModify:
 	; Check for the magic 5-byte pattern that gives away the mouse card
-	lda $c005					; These addresses are modified in place on
-	cmp #$38					; each loop iteration
+	phx
+	ldx WG_MOUSE_OFFSETS, y	
+	lda $c700, x
+	plx
+	cmp WG_MOUSE_IDBYTES, y
 	bne WGFindMouse_nextSlot
-	lda $c007
-	cmp #$18
-	bne WGFindMouse_nextSlot
-	lda $c00b
-	cmp #$01
-	bne WGFindMouse_nextSlot
-	lda $c00c
-	cmp #$20
-	bne WGFindMouse_nextSlot
-	lda $c0fb
-	cmp #$d6
-	bne WGFindMouse_nextSlot
-	bra WGFindMouse_found
-
-WGFindMouse_nextSlot:
-	dex
-	bmi WGFindMouse_none
-	bra WGFindMouse_loop
+	dey
+	bpl WGFindMouse_loopModify
 
 WGFindMouse_found:
 	; Found it! Now configure all our indirection lookups
-	stx WG_MOUSE_SLOT
-	lda #$c0
-	ora WG_MOUSE_SLOT
-	sta WG_MOUSE_JUMPH
-	sta WGCallMouse+5			; Self-modifying code!
+	stx WG_MOUSE_JUMPH
+	stx WGCallMouse+5			; Self-modifying code!
 	txa
+	and #7
+	sta WG_MOUSE_SLOT
 	asl
 	asl
 	asl
-	asl
+	asl					; shift clears the carry
 	sta WG_MOUSE_SLOTSHIFTED
-	clc
 	bra WGFindMouse_done
 
-WGFindMouse_none:
-	stz WG_MOUSE_SLOT
-	sec
+WGFindMouse_nextSlot:
+	dex
+	cpx #$c0
+	bne WGFindMouse_loop			; Carry is set on exit
 
 WGFindMouse_done:
 	RESTORE_AX
@@ -335,7 +312,12 @@ WGMouseInterruptHandler:
 
 	CALLMOUSE SERVEMOUSE
 	bcc WGMouseInterruptHandler_regard
-	jmp WGMouseInterruptHandler_disregard
+
+WGMouseInterruptHandler_disregard:
+	; Carry will still be set here, to notify ProDOS that
+	; this interrupt was not ours
+	RESTORE_AXY
+	rts
 
 WGMouseInterruptHandler_regard:
 	php
@@ -347,88 +329,74 @@ WGMouseInterruptHandler_regard:
 
 	ldx WG_MOUSE_SLOT
 	lda MOUSTAT,x			; Check interrupt status bits first, because READMOUSE clears them
-	and #MOUSTAT_MASK_BUTTONINT
-	bne WGMouseInterruptHandler_button
-
-	lda MOUSTAT,x
-	and #MOUSTAT_MASK_MOVEINT
-	bne WGMouseInterruptHandler_mouse
-	jmp WGMouseInterruptHandler_VBL
+	and #(MOUSTAT_MASK_BUTTONINT or MOUSTAT_MASK_MOVEINT)
+	tax
+	jmp (WG_MOUSE_DISPATCH, X)
 
 WGMouseInterruptHandler_mouse:
 	jsr WGUndrawPointer			; Erase the old mouse pointer
 
 	; Read the mouse state. Note that interrupts need to remain
 	; off until after the data is copied.
-	CALLMOUSE READMOUSE
+	jsr WGReadMouse			; Movement/button status bits are now valid
 
-	ldx WG_MOUSE_SLOT
-	lda MOUSTAT,x			; Movement/button status bits are now valid
-	sta WG_MOUSE_STAT
+	lda WG_APPLEIIE
+	cmp #1				; check via carry
+	lda MOUSE_XL,x
+	ldy MOUSE_YL,x
 
-	lda WG_APPLEIIC
-	bne WGMouseInterruptHandler_IIc
+WGMouseInterruptHandler_IIc:		; IIc tracks much slower, so don't scale
+	bcc WGMouseInterruptHandler_draw
 
+WGMouseInterruptHandler_IIe:
 	; Read mouse position and transform it into screen space
 	; SCALING:  If you change the clamps, change this division from
 	; 1024 to match your new values.
 	lsr MOUSE_XH,x
-	ror MOUSE_XL,x
+	ror
 	lsr MOUSE_XH,x
-	ror MOUSE_XL,x
+	ror
 	lsr MOUSE_XH,x
-	ror MOUSE_XL,x
+	ror
+	tax
+	tya
 
-	lda MOUSE_XL,x
-	sta WG_MOUSEPOS_X
-
 	lsr MOUSE_YH,x
-	ror MOUSE_YL,x
+	ror
 	lsr MOUSE_YH,x
-	ror MOUSE_YL,x
+	ror
 	lsr MOUSE_YH,x
-	ror MOUSE_YL,x
+	ror
 	lsr MOUSE_YH,x
-	ror MOUSE_YL,x
+	ror
 	lsr MOUSE_YH,x
-	ror MOUSE_YL,x
-
-	lda MOUSE_YL,x
-	sta WG_MOUSEPOS_Y
-	bra WGMouseInterruptHandler_draw
-
-WGMouseInterruptHandler_IIc:		; IIc tracks much slower, so don't scale
-	lda MOUSE_XL,x
-	sta WG_MOUSEPOS_X
-	lda MOUSE_YL,x
-	sta WG_MOUSEPOS_Y
+	ror
+	tay
+	txa
 
 WGMouseInterruptHandler_draw:
+	sta WG_MOUSEPOS_X
+	sty WG_MOUSEPOS_Y
 	jsr WGDrawPointer				; Redraw the pointer
 	bra WGMouseInterruptHandler_intDone
 
-WGMouseInterruptHandler_disregard:
-	; Carry will still be set here, to notify ProDOS that
-	; this interrupt was not ours
-	RESTORE_AXY
-	rts
+WGMouseInterruptHandler_VBL:
+	jsr WGReadMouse			; Movement/button status bits are now valid
+	bmi WGMouseInterruptHandler_intDone
+
+	stz WG_MOUSE_BUTTON_DOWN
+	bra WGMouseInterruptHandler_intDone
 
 WGMouseInterruptHandler_button:
-	CALLMOUSE READMOUSE
-	ldx WG_MOUSE_SLOT
-	lda MOUSTAT,x			; Movement/button status bits are now valid
-	sta WG_MOUSE_STAT
-
-	bit WG_MOUSE_STAT			; Check for rising edge of button state
-	bpl WGMouseInterruptHandler_intDone
+	jsr WGReadMouse			; Movement/button status bits are now valid
+	bpl WGMouseInterruptHandler_intDone	; Check for rising edge of button state
 
 	lda WG_MOUSE_BUTTON_DOWN
 	bne WGMouseInterruptHandler_intDone
 
 WGMouseInterruptHandler_buttonDown:
 	; Button went down, so make a note of location for later
-	lda #1
-	sta WG_MOUSE_BUTTON_DOWN
+	inc WG_MOUSE_BUTTON_DOWN
 
 	lda WG_MOUSEPOS_X
 	sta WG_MOUSECLICK_X
@@ -436,24 +404,13 @@ WGMouseInterruptHandler_buttonDown:
 	sta WG_MOUSECLICK_Y
 
 WGMouseInterruptHandler_intDone:
+	ldx #0
 	pla						; Restore text bank
 	bpl WGMouseInterruptHandler_intDoneBankOff
-	SETSWITCH	PAGE2ON
-	bra WGMouseInterruptHandler_done
-
-WGMouseInterruptHandler_VBL:
-	CALLMOUSE READMOUSE
-	ldx WG_MOUSE_SLOT
-	lda MOUSTAT,x			; Movement/button status bits are now valid
-	sta WG_MOUSE_STAT
-
-	bmi WGMouseInterruptHandler_intDone
-
-	stz WG_MOUSE_BUTTON_DOWN
-	bra WGMouseInterruptHandler_intDone
+	inx
 
 WGMouseInterruptHandler_intDoneBankOff:
-	SETSWITCH	PAGE2OFF
+	sta	PAGE2OFF, x
 
 WGMouseInterruptHandler_done:
 	RESTORE_AXY
@@ -462,7 +419,13 @@ WGMouseInterruptHandler_done:
 	clc								; Notify ProDOS this was our interrupt
 	rts
 
+WGReadMouse:
+	CALLMOUSE READMOUSE
 
+	ldx WG_MOUSE_SLOT
+	lda MOUSTAT,x
+	sta WG_MOUSE_STAT
+	rts
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -502,12 +465,24 @@ WG_MOUSECLICK_Y:
 .byte 0
 
 
+; Mouse identification data
+WG_MOUSE_OFFSETS:
+.byte 5, 7, $b, $c, $fb
+WG_MOUSE_IDBYTES:
+.byte $38, $18, $1, $20, $d6
+
+; Mouse interrupt handler dispatch table
+WG_MOUSE_DISPATCH:
+.addr WGMouseInterruptHandler_VBL
+.addr WGMouseInterruptHandler_mouse
+.addr WGMouseInterruptHandler_button
+
 ; Internal state for the driver (no touchy!)
 WG_MOUSE_STAT:
 .byte 0
 WG_MOUSEBG:
 .byte 0
-WG_APPLEIIC:
+WG_APPLEIIE:
 .byte 0
 WG_MOUSE_JUMPL:
 .byte 0
@@ -527,9 +502,3 @@ WG_PRODOS_ALLOC:
 	.byte 2
 	.byte 0						; ProDOS returns an ID number for the interrupt here
 	.addr WGMouseInterruptHandler
-
-WG_PRODOS_DEALLOC:
-	.byte 1
-	.byte 0						; To be filled with ProDOS ID number
-
-
