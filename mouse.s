@@ -3,7 +3,7 @@
 ;  Mouse driver for Apple //e Enhanced with mouse card (any slot), or Apple //c(+)
 ;
 ;  Created by Quinn Dunki on 7/14/15.
-;  Updated on 11/29/16 by Peter Ferrie.
+;  Updated on 11/29-30/16 by Peter Ferrie.
 ;  Copyright (c) 2014 One Girl, One Laptop Productions. All rights reserved.
 ;
 
@@ -101,7 +101,7 @@ WGEnableMouse:
 	cmp #$06
 	bne WGEnableMouse_Error		; II or II+? Sorry...
 	lda $fbc0
-	sta WG_APPLEIIE
+	sta WGIsAppleIIe+1		; Self-modifying code!
 
 	; Install our interrupt handler via ProDOS (play nice!)
 	jsr PRODOS_MLI
@@ -112,7 +112,6 @@ WGEnableMouse:
 	; Initialize the mouse
 	stz WG_MOUSEPOS_X
 	stz WG_MOUSEPOS_Y
-	stz WG_MOUSEBG
 
 	CALLMOUSE INITMOUSE
 	bcs WGEnableMouse_Error	; Firmware sets carry if mouse is not available
@@ -132,7 +131,8 @@ WGEnableMouse:
 
 	; Scale the mouse's range into something easy to do math with,
 	; while retaining as much range of motion and precision as possible
-	lda WG_APPLEIIE
+
+	lda WGIsAppleIIe+1
 	bne WGEnableMouse_ConfigIIe
 
 	; Sorry //c, no scaling for you
@@ -229,7 +229,7 @@ WGCallMouse:
 	; up code, to make sure we have the right slot entry point and firmware
 	; offset
 	ldx $c400			; Self-modifying code!
-	stx WG_MOUSE_JUMPL	; Get low byte of final jump from firmware
+	stx WGCallMouse+4	; Get low byte of final jump from firmware
 
 	php					; Note that mouse firmware is not re-entrant,
 	sei					; so we must disable interrupts inside them
@@ -239,9 +239,9 @@ WGCallMouse:
 	rts
 
 WGCallMouse_redirect:
-	ldx WG_MOUSE_JUMPH
-	ldy WG_MOUSE_SLOTSHIFTED
-	jmp (WG_MOUSE_JUMPL)
+	ldx WGCallMouse+5
+	ldy #$40			; Self-modifying code!
+	jmp (WGCallMouse+4)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -253,7 +253,7 @@ WGCallMouse_redirect:
 WGFindMouse:
 	SAVE_AX
 
-	stz WG_MOUSE_SLOT
+	stz WGReadMouseBits+1			; Self-modifying code!
 	ldx #$c7
 
 WGFindMouse_loop:
@@ -264,7 +264,7 @@ WGFindMouse_loopModify:
 	; Check for the magic 5-byte pattern that gives away the mouse card
 	phx
 	ldx WG_MOUSE_OFFSETS, y	
-	lda $c700, x
+	lda $c700, x				; Self-modifying code!
 	plx
 	cmp WG_MOUSE_IDBYTES, y
 	bne WGFindMouse_nextSlot
@@ -273,16 +273,15 @@ WGFindMouse_loopModify:
 
 WGFindMouse_found:
 	; Found it! Now configure all our indirection lookups
-	stx WG_MOUSE_JUMPH
 	stx WGCallMouse+5			; Self-modifying code!
 	txa
 	and #7
-	sta WG_MOUSE_SLOT
+	sta WGReadMouseBits+1			; Self-modifying code!
 	asl
 	asl
 	asl
 	asl					; shift clears the carry
-	sta WG_MOUSE_SLOTSHIFTED
+	sta WGCallMouse_redirect+4		; Self-modifying code!
 	bra WGFindMouse_done
 
 WGFindMouse_nextSlot:
@@ -327,10 +326,9 @@ WGMouseInterruptHandler_regard:
 	pha
 	SETSWITCH	PAGE2OFF
 
-	ldx WG_MOUSE_SLOT
-	lda MOUSTAT,x			; Check interrupt status bits first, because READMOUSE clears them
+	jsr WGReadMouseBits		; Check interrupt status bits first, because READMOUSE clears them
 	and #(MOUSTAT_MASK_BUTTONINT or MOUSTAT_MASK_MOVEINT)
-	tax
+	tax				; conveniently mapping to values 0, 2, and 4
 	jmp (WG_MOUSE_DISPATCH, X)
 
 WGMouseInterruptHandler_mouse:
@@ -340,7 +338,8 @@ WGMouseInterruptHandler_mouse:
 	; off until after the data is copied.
 	jsr WGReadMouse			; Movement/button status bits are now valid
 
-	lda WG_APPLEIIE
+WGIsAppleIIe:
+	lda #0				; Self-modifying code!
 	cmp #1				; check via carry
 	lda MOUSE_XL,x
 	ldy MOUSE_YL,x
@@ -384,19 +383,20 @@ WGMouseInterruptHandler_VBL:
 	jsr WGReadMouse			; Movement/button status bits are now valid
 	bmi WGMouseInterruptHandler_intDone
 
-	stz WG_MOUSE_BUTTON_DOWN
+	stz WGMouseButtonState+1	; Self-modifying code!
 	bra WGMouseInterruptHandler_intDone
 
 WGMouseInterruptHandler_button:
 	jsr WGReadMouse			; Movement/button status bits are now valid
 	bpl WGMouseInterruptHandler_intDone	; Check for rising edge of button state
 
-	lda WG_MOUSE_BUTTON_DOWN
+WGMouseButtonState:
+	lda #0				; Self-modifying code!
 	bne WGMouseInterruptHandler_intDone
 
 WGMouseInterruptHandler_buttonDown:
 	; Button went down, so make a note of location for later
-	inc WG_MOUSE_BUTTON_DOWN
+	inc WGMouseButtonState+1	; Self-modifying code!
 
 	lda WG_MOUSEPOS_X
 	sta WG_MOUSECLICK_X
@@ -422,9 +422,9 @@ WGMouseInterruptHandler_done:
 WGReadMouse:
 	CALLMOUSE READMOUSE
 
-	ldx WG_MOUSE_SLOT
+WGReadMouseBits:
+	ldx #0				; Self-modifying code!
 	lda MOUSTAT,x
-	sta WG_MOUSE_STAT
 	rts
 
 
@@ -476,24 +476,6 @@ WG_MOUSE_DISPATCH:
 .addr WGMouseInterruptHandler_VBL
 .addr WGMouseInterruptHandler_mouse
 .addr WGMouseInterruptHandler_button
-
-; Internal state for the driver (no touchy!)
-WG_MOUSE_STAT:
-.byte 0
-WG_MOUSEBG:
-.byte 0
-WG_APPLEIIE:
-.byte 0
-WG_MOUSE_JUMPL:
-.byte 0
-WG_MOUSE_JUMPH:
-.byte 0
-WG_MOUSE_SLOT:
-.byte 0
-WG_MOUSE_SLOTSHIFTED:
-.byte 0
-WG_MOUSE_BUTTON_DOWN:
-.byte 0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; ProDOS system call parameter blocks
