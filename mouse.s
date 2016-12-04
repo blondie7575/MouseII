@@ -152,11 +152,11 @@ WGEnableMouse_ConfigIIe:
 	ldx #<SCALE_Y_IIE
 	ldy #>SCALE_Y_IIE
 
-WGClampMouse1
+WGClampMouse1:
 	pha
 	lda #1
 	.byte $2C				; mask plx/ply
-WGClampMouse2
+WGClampMouse2:
         plx
         ply
 	stx MOUSE_CLAMPL
@@ -327,7 +327,7 @@ WGMouseInterruptHandler_regard:
 	SETSWITCH	PAGE2OFF
 
 	jsr WGReadMouseBits		; Check interrupt status bits first, because READMOUSE clears them
-	and #(MOUSTAT_MASK_BUTTONINT or MOUSTAT_MASK_MOVEINT)
+	and #(MOUSTAT_MASK_BUTTONINT | MOUSTAT_MASK_MOVEINT)
 	tax				; conveniently mapping to values 0, 2, and 4
 	jmp (WG_MOUSE_DISPATCH, X)
 
