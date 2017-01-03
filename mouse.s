@@ -138,7 +138,9 @@ WGEnableMouse:
 	; Sorry //c, no scaling for you
 	; //c's tracking is weird. Need to clamp to a much smaller range
 
+	.if >SCALE_X_IIC > 0
 	lda #>SCALE_X_IIC
+	.endif
 	pha
 	lda #<SCALE_X_IIC
 	ldx #<SCALE_Y_IIC
@@ -351,27 +353,15 @@ WGMouseInterruptHandler_IIe:
 	; Read mouse position and transform it into screen space
 	; SCALING:  If you change the clamps, change this division from
 	; 1024 to match your new values.
-	lsr MOUSE_XH,x
-	ror
-	lsr MOUSE_XH,x
-	ror
-	lsr MOUSE_XH,x
-	ror
+	jsr lsrMouseXH
+	pha
+	txa
+	ora #$80                        ; switch to YH-addressing
 	tax
 	tya
-
-	lsr MOUSE_YH,x
-	ror
-	lsr MOUSE_YH,x
-	ror
-	lsr MOUSE_YH,x
-	ror
-	lsr MOUSE_YH,x
-	ror
-	lsr MOUSE_YH,x
-	ror
+	jsr lsrMouseYH
 	tay
-	txa
+	pla
 
 WGMouseInterruptHandler_draw:
 	sta WG_MOUSEPOS_X
@@ -417,6 +407,21 @@ WGMouseInterruptHandler_done:
 
 	plp
 	clc								; Notify ProDOS this was our interrupt
+	rts
+
+lsrMouseYH:
+	lsr MOUSE_XH,x                  ;really YH because X OR #$80
+	ror
+	lsr MOUSE_XH,x                  ;really YH because X OR #$80
+	ror
+
+lsrMouseXH:
+	lsr MOUSE_XH,x
+	ror
+	lsr MOUSE_XH,x
+	ror
+	lsr MOUSE_XH,x
+	ror
 	rts
 
 WGReadMouse:
