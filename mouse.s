@@ -139,20 +139,26 @@ WGEnableMouse:
 	; //c's tracking is weird. Need to clamp to a much smaller range
 
 	.if >SCALE_X_IIC > 0
-	lda #>SCALE_X_IIC
+	ldy #>SCALE_X_IIC
 	.endif
-	pha
+	phy
+	.if >SCALE_Y_IIC = >SCALE_X_IIC
+	.else
+	ldy #>SCALE_Y_IIC
+	.endif
 	lda #<SCALE_X_IIC
 	ldx #<SCALE_Y_IIC
-	ldy #>SCALE_Y_IIC
 	bra WGClampMouse1
 
 WGEnableMouse_ConfigIIe:
-	lda #>SCALE_X_IIE
-	pha
+	ldy #>SCALE_X_IIE
+	phy
+	.if >SCALE_Y_IIE = >SCALE_X_IIE
+	.else
+	ldy #>SCALE_Y_IIE
+	.endif
 	lda #<SCALE_X_IIE
 	ldx #<SCALE_Y_IIE
-	ldy #>SCALE_Y_IIE
 
 WGClampMouse1:
 	pha
@@ -225,25 +231,25 @@ WGDisableMouse_done:
 ; X: Name of routine (firmware offset constant)
 ; Side effects: Clobbers all registers
 WGCallMouse:
-	stx WGCallMouse+4	; Use self-modifying code to smooth out some indirection
+	php					; Note that mouse firmware is not re-entrant,
+	sei					; so we must disable interrupts inside them
+						; and must be first to avoid interruption
+						; during the self-modification
+	stx WGCallMouse+6	; Use self-modifying code to smooth out some indirection
 
 	; This load address is overwritten by the above code, AND by the mouse set
 	; up code, to make sure we have the right slot entry point and firmware
 	; offset
 	ldx $c400			; Self-modifying code!
-	stx WGCallMouse+4	; Get low byte of final jump from firmware
+	stx WGCallMouse_redirect+6	; Get low byte of final jump from firmware
 
-	php					; Note that mouse firmware is not re-entrant,
-	sei					; so we must disable interrupts inside them
-
-	jsr WGCallMouse_redirect
+WGCallMouse_redirect:
+	ldx WGCallMouse_redirect+7
+	ldy #$40			; Self-modifying code!
+	jsr $c400			; Self-modifying code!
 	plp					; Restore interrupts to previous state
 	rts
 
-WGCallMouse_redirect:
-	ldx WGCallMouse+5
-	ldy #$40			; Self-modifying code!
-	jmp (WGCallMouse+4)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -275,7 +281,8 @@ WGFindMouse_loopModify:
 
 WGFindMouse_found:
 	; Found it! Now configure all our indirection lookups
-	stx WGCallMouse+5			; Self-modifying code!
+	stx WGCallMouse+7			; Self-modifying code!
+	stx WGCallMouse_redirect+7		; Self-modifying code!
 	txa
 	and #7
 	sta WGReadMouseBits+1			; Self-modifying code!
