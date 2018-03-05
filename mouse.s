@@ -488,6 +488,7 @@ WG_MOUSE_DISPATCH:
 .addr WGMouseInterruptHandler_VBL
 .addr WGMouseInterruptHandler_mouse
 .addr WGMouseInterruptHandler_button
+.addr WGMouseInterruptHandler_button			; in case of clicking while moving
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; ProDOS system call parameter blocks
