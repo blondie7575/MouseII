@@ -132,7 +132,7 @@ WGEnableMouse:
 	; Scale the mouse's range into something easy to do math with,
 	; while retaining as much range of motion and precision as possible
 
-	lda WGIsAppleIIe+1
+	ldy WGIsAppleIIe+1
 	bne WGEnableMouse_ConfigIIe
 
 	; Sorry //c, no scaling for you
