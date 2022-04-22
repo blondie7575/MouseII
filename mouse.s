@@ -247,7 +247,10 @@ WGCallMouse_redirect:
 	ldx WGCallMouse_redirect+7
 	ldy #$40			; Self-modifying code!
 	jsr $c400			; Self-modifying code!
+	lda #0
+	rol				; preserve returned carry
 	plp					; Restore interrupts to previous state
+	lsr				; return carry
 	rts
 
 
@@ -328,9 +331,6 @@ WGMouseInterruptHandler_disregard:
 	rts
 
 WGMouseInterruptHandler_regard:
-	php
-	sei
-
 	lda PAGE2			; Need to preserve text bank, because we may interrupt rendering
 	pha
 	SETSWITCH	PAGE2OFF
@@ -412,7 +412,6 @@ WGMouseInterruptHandler_intDoneBankOff:
 WGMouseInterruptHandler_done:
 	RESTORE_AXY
 
-	plp
 	clc								; Notify ProDOS this was our interrupt
 	rts
 
