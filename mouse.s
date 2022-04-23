@@ -94,7 +94,7 @@ WGEnableMouse:
 
 	; Find slot number and calculate the various indirections needed
 	jsr WGFindMouse
-	bcs WGEnableMouse_Error
+	bcs WGEnableMouse_Error1
 
 	; Note if we're a //e or //c, because mouse tracking and interrupts are different
 	lda $fbb3
@@ -102,7 +102,17 @@ WGEnableMouse:
 	bne WGEnableMouse_Error		; II or II+? Sorry...
 	lda $fbc0
 	sta WGIsAppleIIe+1		; Self-modifying code!
+	sec
+	jsr $fe1f			; check for IIgs
+	bcs WGEnableMouse_II
+	lda #0
+	sta WGIsAppleIIe+1		; Self-modifying code!
+	lda #<WGMouseInterruptHandler_mouse
+	sta WGMouseInterruptHandler_intDoneGS+1
+	lda #>WGMouseInterruptHandler_mouse
+	sta WGMouseInterruptHandler_intDoneGS+2
 
+WGEnableMouse_II:
 	; Install our interrupt handler via ProDOS (play nice!)
 	jsr PRODOS_MLI
 	.byte ALLOC_INTERRUPT
@@ -114,6 +124,7 @@ WGEnableMouse:
 	stz WG_MOUSEPOS_Y
 
 	CALLMOUSE INITMOUSE
+WGEnableMouse_Error1:
 	bcs WGEnableMouse_Error	; Firmware sets carry if mouse is not available
 
 	CALLMOUSE CLEARMOUSE
@@ -378,18 +389,18 @@ WGMouseInterruptHandler_draw:
 
 WGMouseInterruptHandler_VBL:
 	jsr WGReadMouse			; Movement/button status bits are now valid
-	bmi WGMouseInterruptHandler_intDone
+	bmi WGMouseInterruptHandler_intDoneGS
 
 	stz WGMouseButtonState+1	; Self-modifying code!
-	bra WGMouseInterruptHandler_intDone
+	bra WGMouseInterruptHandler_intDoneGS
 
 WGMouseInterruptHandler_button:
 	jsr WGReadMouse			; Movement/button status bits are now valid
-	bpl WGMouseInterruptHandler_intDone	; Check for rising edge of button state
+	bpl WGMouseInterruptHandler_intDoneGS	; Check for rising edge of button state
 
 WGMouseButtonState:
 	lda #0				; Self-modifying code!
-	bne WGMouseInterruptHandler_intDone
+	bne WGMouseInterruptHandler_intDoneGS
 
 WGMouseInterruptHandler_buttonDown:
 	; Button went down, so make a note of location for later
@@ -399,6 +410,9 @@ WGMouseInterruptHandler_buttonDown:
 	sta WG_MOUSECLICK_X
 	lda WG_MOUSEPOS_Y
 	sta WG_MOUSECLICK_Y
+
+WGMouseInterruptHandler_intDoneGS:
+	jmp WGMouseInterruptHandler_intDone
 
 WGMouseInterruptHandler_intDone:
 	ldx #0
